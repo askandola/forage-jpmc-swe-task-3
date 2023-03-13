@@ -1,0 +1,168 @@
+From 62645d41ada3e74870f6d24b64b081c0237a113e Mon Sep 17 00:00:00 2001
+From: Arvinder Singh Kandola <askandola2@gmail.com>
+Date: Mon, 13 Mar 2023 10:21:57 +0530
+Subject: [PATCH] task 3 completed
+
+---
+ .gitignore             |  2 ++
+ datafeed/server3.py    |  4 ++--
+ src/DataManipulator.ts | 31 +++++++++++++++++++++----------
+ src/DataStreamer.ts    |  2 +-
+ src/Graph.tsx          | 27 ++++++++++++++++-----------
+ 5 files changed, 42 insertions(+), 24 deletions(-)
+
+diff --git a/.gitignore b/.gitignore
+index 4d29575..bc41f42 100755
+--- a/.gitignore
++++ b/.gitignore
+@@ -21,3 +21,5 @@
+ npm-debug.log*
+ yarn-debug.log*
+ yarn-error.log*
++
++venv
+diff --git a/datafeed/server3.py b/datafeed/server3.py
+index 2de4e28..a14cb44 100644
+--- a/datafeed/server3.py
++++ b/datafeed/server3.py
+@@ -202,7 +202,7 @@ def get(req_handler, routes):
+                 req_handler.wfile.write(bytes(data,  encoding = 'utf-8'))
+                 return
+ 
+-def run(routes, host = '0.0.0.0', port = 8080):
++def run(routes, host = '0.0.0.0', port = 8081):
+     """ Runs a class as a server whose methods have been decorated with
+         @route.
+     """
+@@ -215,7 +215,7 @@ def run(routes, host = '0.0.0.0', port = 8080):
+     thread = threading.Thread(target = server.serve_forever)
+     thread.daemon = True
+     thread.start()
+-    print ('HTTP server started on port 8080')
++    print ('HTTP server started on port 8081')
+     while True:
+         from time import sleep
+         sleep(1)
+diff --git a/src/DataManipulator.ts b/src/DataManipulator.ts
+index 7f62295..6419a9c 100644
+--- a/src/DataManipulator.ts
++++ b/src/DataManipulator.ts
+@@ -1,20 +1,31 @@
+ import { ServerRespond } from './DataStreamer';
+ 
+ export interface Row {
+-  stock: string,
+-  top_ask_price: number,
+   timestamp: Date,
++  price_abc: number,
++  price_def: number,
++  ratio: number,
++  upper_bound: number,
++  lower_bound: number,
++  trigger_alert: number | undefined,
+ }
+ 
+ 
+ export class DataManipulator {
+-  static generateRow(serverResponds: ServerRespond[]) {
+-    return serverResponds.map((el: any) => {
+-      return {
+-        stock: el.stock,
+-        top_ask_price: el.top_ask && el.top_ask.price || 0,
+-        timestamp: el.timestamp,
+-      };
+-    })
++  static generateRow(serverResponds: ServerRespond[]): Row {
++    const price_abc = (serverResponds[0].top_ask.price+serverResponds[0].top_bid.price)/2;
++    const price_def = (serverResponds[1].top_ask.price+serverResponds[1].top_bid.price)/2;
++    const ratio = price_abc / price_def
++    const upper_bound = 1 + 0.1;
++    const lower_bound = 1 - 0.1;
++    return {
++      price_abc: price_abc,
++      price_def: price_def,
++      ratio: ratio,
++      upper_bound: upper_bound,
++      lower_bound: lower_bound,
++      timestamp: (serverResponds[0].timestamp>serverResponds[1].timestamp)? serverResponds[0].timestamp: serverResponds[1].timestamp,
++      trigger_alert: (ratio>upper_bound || ratio<lower_bound)? ratio: undefined,
++    }
+   }
+ }
+diff --git a/src/DataStreamer.ts b/src/DataStreamer.ts
+index 9d9eca7..c048282 100644
+--- a/src/DataStreamer.ts
++++ b/src/DataStreamer.ts
+@@ -10,7 +10,7 @@ export interface ServerRespond {
+ }
+ 
+ class DataStreamer {
+-  static API_URL: string = 'http://localhost:8080/query?id=1';
++  static API_URL: string = 'http://localhost:8081/query?id=1';
+ 
+   static getData(callback: (data: ServerRespond[]) => void): void {
+     const request = new XMLHttpRequest();
+diff --git a/src/Graph.tsx b/src/Graph.tsx
+index 277797d..098db0a 100644
+--- a/src/Graph.tsx
++++ b/src/Graph.tsx
+@@ -1,5 +1,5 @@
+ import React, { Component } from 'react';
+-import { Table } from '@finos/perspective';
++import { Table, TableData } from '@finos/perspective';
+ import { ServerRespond } from './DataStreamer';
+ import { DataManipulator } from './DataManipulator';
+ import './Graph.css';
+@@ -23,10 +23,13 @@ class Graph extends Component<IProps, {}> {
+     const elem = document.getElementsByTagName('perspective-viewer')[0] as unknown as PerspectiveViewerElement;
+ 
+     const schema = {
+-      stock: 'string',
+-      top_ask_price: 'float',
+-      top_bid_price: 'float',
+       timestamp: 'date',
++      price_abc: 'float',
++      price_def: 'float',
++      ratio: 'float',
++      lower_bound: 'float',
++      upper_bound: 'float',
++      trigger_alert: 'float',
+     };
+ 
+     if (window.perspective && window.perspective.worker()) {
+@@ -36,23 +39,25 @@ class Graph extends Component<IProps, {}> {
+       // Load the `table` in the `<perspective-viewer>` DOM reference.
+       elem.load(this.table);
+       elem.setAttribute('view', 'y_line');
+-      elem.setAttribute('column-pivots', '["stock"]');
+       elem.setAttribute('row-pivots', '["timestamp"]');
+-      elem.setAttribute('columns', '["top_ask_price"]');
++      elem.setAttribute('columns', '["ratio", "upper_bound", "lower_bound", "trigger_alert"]');
+       elem.setAttribute('aggregates', JSON.stringify({
+-        stock: 'distinctcount',
+-        top_ask_price: 'avg',
+-        top_bid_price: 'avg',
+         timestamp: 'distinct count',
++        price_abc: 'avg',
++        price_def: 'avg',
++        ratio: 'avg',
++        upper_bound: 'avg',
++        lower_bound: 'avg',
++        trigger_alert: 'avg',
+       }));
+     }
+   }
+ 
+   componentDidUpdate() {
+     if (this.table) {
+-      this.table.update(
++      this.table.update([
+         DataManipulator.generateRow(this.props.data),
+-      );
++      ] as unknown as TableData);
+     }
+   }
+ }
+-- 
+2.31.1.windows.1
+
